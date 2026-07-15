@@ -1,0 +1,111 @@
+services:
+  chatbot-backend:
+    build:
+      context: .
+      dockerfile: docker/chatbot/Dockerfile
+    container_name: fcim-chatbot-backend
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      API_HOST: 0.0.0.0
+      API_PORT: "8010"
+      API_WORKERS: "4"
+      # LLM — vLLM container on internal network
+      LLM_API_BASE: http://chatbot-vllm:8001/v1
+      LLM_MODEL: Qwen/Qwen2.5-14B-Instruct
+      LLM_MAX_TOKENS: "512"
+      LLM_TEMPERATURE: "0.3"
+      LLM_MAX_MODEL_LEN: "4096"
+      # Embedding — fine-tuned model on GPU
+      EMBEDDING_MODEL: intfloat/multilingual-e5-large
+      EMBEDDING_DEVICE: cuda
+      EMBEDDING_BATCH_SIZE: "64"
+      # Qdrant — existing container
+      QDRANT_HOST: fcim-qdrant
+      QDRANT_PORT: "6333"
+      QDRANT_COLLECTION: fcim_courses
+      # Redis — existing container
+      REDIS_HOST: fcim-redis
+      REDIS_PORT: "6379"
+      REDIS_TTL: "604800"
+      # RAG
+      RAG_TOP_K: "7"
+      RAG_RETRIEVE_K: "25"
+      RAG_SIMILARITY_THRESHOLD: "0.3"
+      RAG_RERANK: "true"
+      RAG_MULTI_QUERY: "true"
+      RAG_MULTI_QUERY_COUNT: "3"
+      # CORS
+      CORS_ORIGINS: "http://10.202.40.130,http://100.112.141.49,http://localhost"
+      # Moodle integration
+      MOODLE_URL: http://10.202.40.130
+    volumes:
+      - ./src:/app/src:ro
+      - ./models:/app/models:ro
+      - chatbot_logs:/app/logs
+    depends_on:
+      chatbot-vllm:
+        condition: service_healthy
+    networks:
+      - chatbot_internal
+      - fcim_existing
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  chatbot-vllm:
+    image: vllm/vllm-openai:v0.6.3
+    container_name: fcim-chatbot-vllm
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "0"
+    ports:
+      - "127.0.0.1:8011:8001"
+    command: >
+      --model /model
+      --port 8001
+      --host 0.0.0.0
+      --max-model-len 4096
+      --gpu-memory-utilization 0.60
+      --dtype auto
+      --quantization awq
+      --served-model-name Qwen/Qwen2.5-14B-Instruct
+      --trust-remote-code
+      --enable-chunked-prefill
+      --max-num-seqs 128
+    volumes:
+      - ./models/Qwen--Qwen2.5-14B-Instruct-AWQ:/model:ro
+    networks:
+      - chatbot_internal
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 120s
+
+networks:
+  chatbot_internal:
+    name: fcim_chatbot_internal
+    driver: bridge
+  fcim_existing:
+    name: llm_else_fcim-network
+    external: true
+
+volumes:
+  chatbot_logs:
+    name: fcim_chatbot_logs

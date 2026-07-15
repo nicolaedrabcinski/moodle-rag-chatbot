@@ -1,0 +1,76 @@
+services:
+  moodle-db:
+    image: mariadb:10.5
+    container_name: fcim-moodle-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MOODLE_DB_NAME:-moodle}
+      MYSQL_USER: ${MOODLE_DB_USER:-moodle}
+      MYSQL_PASSWORD: ${MOODLE_DB_PASSWORD}
+      MYSQL_CHARACTER_SET_SERVER: utf8mb4
+      MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-file-format=Barracuda
+      --innodb-file-per-table=1
+      --innodb-large-prefix=1
+    volumes:
+      - moodle_db_data:/var/lib/mysql
+    networks:
+      - moodle_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  moodle:
+    build:
+      context: ./docker/moodle
+      dockerfile: Dockerfile
+    container_name: fcim-moodle
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      MOODLE_WWWROOT: ${MOODLE_WWWROOT:-http://10.202.40.130}
+      MOODLE_DB_HOST: moodle-db
+      MOODLE_DB_NAME: ${MOODLE_DB_NAME:-moodle}
+      MOODLE_DB_USER: ${MOODLE_DB_USER:-moodle}
+      MOODLE_DB_PASSWORD: ${MOODLE_DB_PASSWORD}
+      MOODLE_DB_PORT: 3306
+      MOODLE_SITE_FULLNAME: ${MOODLE_SITE_FULLNAME:-FCIM ELSE Platform}
+      MOODLE_SITE_SHORTNAME: ${MOODLE_SITE_SHORTNAME:-ELSE}
+      MOODLE_ADMIN_USER: ${MOODLE_ADMIN_USER:-admin}
+      MOODLE_ADMIN_PASSWORD: ${MOODLE_ADMIN_PASSWORD}
+      MOODLE_ADMIN_EMAIL: ${MOODLE_ADMIN_EMAIL:-admin@fcim.utm.md}
+      MOODLE_LANG: ${MOODLE_LANG:-en}
+      CHATBOT_API_URL: ${CHATBOT_API_URL:-http://10.202.40.130:8010}
+      CHATBOT_API_KEY: ${CHATBOT_API_KEY:-}
+    volumes:
+      - moodle_data:/var/www/moodledata
+      - ./moodle_plugin/block_aichatbot:/var/www/html/blocks/aichatbot:ro
+    depends_on:
+      moodle-db:
+        condition: service_healthy
+    networks:
+      - moodle_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+networks:
+  moodle_net:
+    name: fcim_moodle_net
+    driver: bridge
+
+volumes:
+  moodle_db_data:
+    name: fcim_moodle_db_data
+  moodle_data:
+    name: fcim_moodle_data
