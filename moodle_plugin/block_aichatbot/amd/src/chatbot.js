@@ -115,7 +115,7 @@ define(['jquery'], function($) {
         var fullText  = '';
         var metaSources = [];
 
-        fetch(cfg.apiUrl + '/api/chat/stream', {method: 'POST', headers: headers, body: body})
+        fetch(cfg.apiUrl, {method: 'POST', headers: headers, body: body})
             .then(function(res) {
                 if (!res.ok) throw new Error('HTTP ' + res.status);
 

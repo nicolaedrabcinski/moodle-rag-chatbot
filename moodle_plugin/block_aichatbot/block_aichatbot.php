@@ -35,9 +35,12 @@ class block_aichatbot extends block_base {
         $course_id  = $COURSE->shortname ?? 'general';
         $user_lang  = current_language();
 
+        // Relative URL so it works regardless of which IP/domain the user accesses Moodle through.
+        $proxy_url = '/blocks/aichatbot/proxy.php';
+
         $this->page->requires->js_call_amd('block_aichatbot/chatbot', 'init', [[
-            'apiUrl'   => $api_url,
-            'apiKey'   => $api_key,
+            'apiUrl'   => $proxy_url,
+            'apiKey'   => '',   // key stays server-side in proxy.php
             'courseId' => $course_id,
             'lang'     => $user_lang,
             'strings'  => [

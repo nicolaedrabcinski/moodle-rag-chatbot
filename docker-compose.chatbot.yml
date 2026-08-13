@@ -38,8 +38,10 @@ services:
       RAG_RERANK: "true"
       RAG_MULTI_QUERY: "true"
       RAG_MULTI_QUERY_COUNT: "3"
+      # Auth
+      API_KEY: "gPzotq6jVapnKRX0Z-JZGrPCsImCHfsgA6wb1r2N_t8"
       # CORS
-      CORS_ORIGINS: "http://10.202.40.130,http://100.112.141.49,http://localhost"
+      CORS_ORIGINS: "http://10.202.40.130,http://100.112.141.49,http://localhost,https://biovm00006.tail46c0ff.ts.net"
       # Moodle integration
       MOODLE_URL: http://10.202.40.130
     volumes:

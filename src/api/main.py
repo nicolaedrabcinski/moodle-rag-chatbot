@@ -9,6 +9,7 @@ from typing import Any, AsyncIterator
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
+import secrets
 from fastapi.staticfiles import StaticFiles
 # from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -97,6 +98,23 @@ app.add_middleware(
     allow_headers=["*"],
     max_age=3600,
 )
+
+
+# API key auth middleware (skips /health and /)
+UNPROTECTED = {"/health", "/", "/docs", "/redoc", "/openapi.json"}
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    if settings.api_key and request.url.path not in UNPROTECTED:
+        auth = request.headers.get("Authorization", "")
+        token = auth.removeprefix("Bearer ").strip()
+        if not secrets.compare_digest(token, settings.api_key):
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"error": "Invalid or missing API key"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    return await call_next(request)
 
 
 # Exception handlers

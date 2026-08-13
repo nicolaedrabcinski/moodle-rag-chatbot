@@ -156,6 +156,8 @@ class Settings(BaseSettings):
     # =========================================================================
     # Security & Authentication
     # =========================================================================
+    api_key: Optional[str] = Field(default=None, description="Bearer token for API access (empty = no auth)")
+
     jwt_secret_key: str = Field(
         default="your-super-secret-jwt-key-change-this-in-production",
         description="JWT secret key",
