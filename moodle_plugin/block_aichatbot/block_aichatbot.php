@@ -105,7 +105,21 @@ class block_aichatbot extends block_base {
 .acb-msg--error .acb-bubble { background:#fff3e0; color:#e65100; border:1px solid #ffcc02; border-radius:8px; font-size:.84rem; }
 
 /* ── Sources ── */
-.acb-sources { font-size: .75rem; color: #888; margin: 3px 0 0 4px; }
+.acb-sources {
+  font-size: .74rem; color: #666; margin: 4px 0 0 4px;
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+}
+.acb-source-item {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: #f0f4ff; border: 1px solid #d0d9f5; border-radius: 4px;
+  padding: 1px 6px; white-space: nowrap;
+}
+.acb-source-num { color: #1a73e8; font-weight: 600; }
+.acb-source-label { color: #444; }
+sup.acb-cite {
+  color: #1a73e8; font-weight: 600; font-size: .7rem;
+  cursor: default; margin-left: 1px;
+}
 
 /* ── Streaming cursor ── */
 .acb-bubble--streaming p:last-child::after {

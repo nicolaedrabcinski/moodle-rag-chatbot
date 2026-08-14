@@ -31,8 +31,39 @@ define(['jquery'], function($) {
         return text
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\[(\d+)\]/g, '<sup class="acb-cite">[$1]</sup>')
             .replace(/\n\n/g, '</p><p>')
             .replace(/\n/g, '<br>');
+    }
+
+    function formatTopic(topic) {
+        if (!topic) return '';
+        // Strip leading number prefix like "09_"
+        var t = topic.replace(/^\d+_/, '');
+        // Replace underscores/hyphens with spaces and title-case
+        return t.replace(/[_-]/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    }
+
+    function buildSourcesHtml(sources) {
+        if (!sources || !sources.length) return '';
+        // Deduplicate by topic (or file_path), keep first occurrence per unique topic
+        var seen = {};
+        var unique = [];
+        sources.forEach(function(s) {
+            var key = (s.topic || s.file_path || s.document || '') + '_' + (s.index || '');
+            if (!seen[key]) {
+                seen[key] = true;
+                unique.push(s);
+            }
+        });
+        var items = unique.map(function(s) {
+            var label = formatTopic(s.topic || s.file_path) || s.document || '';
+            return '<span class="acb-source-item">' +
+                '<span class="acb-source-num">[' + (s.index || '?') + ']</span> ' +
+                '<span class="acb-source-label">' + label + '</span>' +
+                '</span>';
+        });
+        return '<div class="acb-sources">📄 ' + items.join('') + '</div>';
     }
 
     // ── Static message (used for user + welcome) ─────────────────────────────
@@ -50,12 +81,11 @@ define(['jquery'], function($) {
         wrap.appendChild(bubble);
 
         if (sources && sources.length) {
-            var names = sources.map(function(s) { return s.document || s.topic || ''; }).filter(Boolean);
-            if (names.length) {
-                var src = document.createElement('div');
-                src.className = 'acb-sources';
-                src.textContent = '📄 ' + names.join(' · ');
-                wrap.appendChild(src);
+            var srcHtml = buildSourcesHtml(sources);
+            if (srcHtml) {
+                var srcNode = document.createElement('div');
+                srcNode.innerHTML = srcHtml;
+                wrap.appendChild(srcNode.firstChild);
             }
         }
 
@@ -128,14 +158,11 @@ define(['jquery'], function($) {
                         streamEl.bubble.classList.remove('acb-bubble--streaming');
                         // Append sources node
                         if (metaSources.length) {
-                            var names = metaSources
-                                .map(function(s) { return s.document || s.topic || ''; })
-                                .filter(Boolean);
-                            if (names.length) {
-                                var src = document.createElement('div');
-                                src.className = 'acb-sources';
-                                src.textContent = '📄 ' + names.join(' · ');
-                                streamEl.wrap.appendChild(src);
+                            var srcHtml = buildSourcesHtml(metaSources);
+                            if (srcHtml) {
+                                var srcNode = document.createElement('div');
+                                srcNode.innerHTML = srcHtml;
+                                streamEl.wrap.appendChild(srcNode.firstChild);
                             }
                         }
                         // If no text was received, remove empty bubble

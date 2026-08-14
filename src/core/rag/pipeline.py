@@ -241,13 +241,12 @@ class RAGPipeline:
 
         context_parts = []
         for i, chunk in enumerate(chunks, 1):
-            source_info = f"[Курс: {chunk.course_name}"
+            source_info = f"[{i}] {chunk.course_name}"
             if chunk.topic:
-                source_info += f", Тема: {chunk.topic}"
+                source_info += f" — {chunk.topic}"
             if chunk.page_number:
-                source_info += f", Стр. {chunk.page_number}"
-            source_info += f", Релевантность: {chunk.score:.2f}]"
-            context_parts.append(f"Источник {i}: {source_info}\n{chunk.text}")
+                source_info += f", p.{chunk.page_number}"
+            context_parts.append(f"{source_info}\n{chunk.text}")
 
         context = "\n\n---\n\n".join(context_parts)
 
@@ -337,8 +336,14 @@ class RAGPipeline:
         yield json.dumps({
             "type": "meta",
             "sources": [
-                {"document": c.course_name, "topic": c.topic, "score": round(c.score, 3)}
-                for c in chunks
+                {
+                    "index": i,
+                    "document": c.course_name,
+                    "topic": c.topic,
+                    "file_path": c.file_path,
+                    "score": round(c.score, 3),
+                }
+                for i, c in enumerate(chunks, 1)
             ],
             "timing": {"embed_ms": round(embed_ms, 1), "search_ms": round(search_ms, 1)},
         })

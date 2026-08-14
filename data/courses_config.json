@@ -1,0 +1,52 @@
+{
+  "ECD-2026": {
+    "name": "Etica, Comunicare si Drept",
+    "category": "FCIM",
+    "description": "Etica profesionala, comunicare si bazele dreptului in domeniul IT"
+  },
+  "FILOS-2026": {
+    "name": "Filosofie",
+    "category": "FCIM",
+    "description": "Filosofie generala si epistemologie"
+  },
+  "ASD-2026": {
+    "name": "Algoritmi si Structuri de Date",
+    "category": "FCIM",
+    "description": "Algoritmi fundamentali, complexitate, structuri de date"
+  },
+  "BD-2026": {
+    "name": "Baze de Date",
+    "category": "FCIM",
+    "description": "Proiectarea si administrarea bazelor de date relationale"
+  },
+  "IA-2026": {
+    "name": "Inteligenta Artificiala",
+    "category": "FCIM",
+    "description": "Metode si algoritmi de inteligenta artificiala"
+  },
+  "POO-2026": {
+    "name": "Programare Orientata pe Obiecte",
+    "category": "FCIM",
+    "description": "Paradigma orientata pe obiecte, Java/C++"
+  },
+  "RC-2026": {
+    "name": "Retele de Calculatoare",
+    "category": "FCIM",
+    "description": "Protocoale de retea, arhitectura TCP/IP"
+  },
+  "SO-2026": {
+    "name": "Sisteme de Operare",
+    "category": "FCIM",
+    "description": "Sisteme de operare, procese, memorie, sisteme de fisiere"
+  },
+  "AM-2026": {
+    "name": "Analiza Matematica",
+    "category": "FCIM",
+    "description": "Analiza matematica pentru informatica"
+  },
+  "SGBD-2026": {
+    "name": "Sisteme de Gestiune a Bazelor de Date",
+    "category": "FCIM",
+    "description": "PostgreSQL, MySQL, optimizare interogari"
+  }
+}

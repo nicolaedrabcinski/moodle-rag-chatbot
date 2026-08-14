@@ -86,6 +86,13 @@ def load_document(file_path: Path) -> str:
         return ""
 
 
+def load_courses_config() -> Dict[str, Dict]:
+    config_path = project_root / "data" / "courses_config.json"
+    if config_path.exists():
+        return json.loads(config_path.read_text())
+    return {}
+
+
 def load_enrichment_cache(cache_path: str) -> Dict[str, str]:
     """Load document summaries from contextual enrichment cache."""
     path = Path(cache_path)
@@ -143,6 +150,9 @@ def ingest_course(
     all_chunks_to_embed = []   # may include context prefix
     all_payloads = []
 
+    courses_cfg = load_courses_config()
+    course_name = courses_cfg.get(course_id, {}).get("name") or course_id.replace("-", " ")
+
     for file_path in tqdm(files, desc=f"Processing {course_id}"):
         text = load_document(file_path)
         if not text.strip():
@@ -155,7 +165,7 @@ def ingest_course(
             payload = {
                 "text": chunk,
                 "course_id": course_id,
-                "course_name": course_id.replace("-", " "),
+                "course_name": course_name,
                 "file_path": file_path.name,
                 "chunk_index": i,
                 "topic": file_path.stem,
