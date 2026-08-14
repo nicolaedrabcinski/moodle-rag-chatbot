@@ -1,518 +1,321 @@
-# FCIM AI Chatbot - Educational Assistant for ELSE Platform
+# Moodle RAG Chatbot — FCIM UTM
 
-> Production-ready RAG-based multilingual chatbot delivering sub-second responses to student queries about course materials
+> Self-hosted educational AI assistant integrated into the ELSE Moodle platform at the Technical University of Moldova (UTM). Answers student questions using course materials via Retrieval-Augmented Generation.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.109.0-009688.svg)](https://fastapi.tiangolo.com)
-[![Qwen2.5](https://img.shields.io/badge/Model-Qwen2.5--3B-red.svg)](https://qwenlm.github.io/blog/qwen2.5/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688.svg)](https://fastapi.tiangolo.com)
+[![Model](https://img.shields.io/badge/Model-Qwen2.5--14B--AWQ-red.svg)](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct-AWQ)
+[![Eval](https://img.shields.io/badge/LLM--judge%20score-3.65%20%2F%205-brightgreen.svg)]()
 
 ## Overview
 
-FCIM AI Chatbot is a self-hosted educational assistant integrated into the ELSE Platform (Moodle) at the Technical University of Moldova. The system employs Retrieval-Augmented Generation (RAG) to answer student questions based on course materials including PDF lectures, DOCX documents, and PPTX presentations.
+The chatbot is embedded in Moodle as a block plugin (`block_aichatbot`). Students type questions in Romanian, Russian, or English and receive answers grounded in uploaded course materials, with inline source citations.
 
-### Key Features
+**Indexed content:** 13,305 chunks from 2 courses (ECD-2026, FILOS-2026)  
+**Eval quality:** LLM-judge mean 3.65/5, retrieval hit rate 93.9%, no-info rate 3.1%  
+**Access:** public HTTPS via Tailscale Funnel — `https://biovm00006.tail46c0ff.ts.net`
 
-- **Multilingual Support** - Native processing of queries and responses across multiple languages
-- **Sub-Second Latency** - p95 response time under 1 second with intelligent caching
-- **Cost-Optimized** - 90% cost reduction using Qwen2.5-3B vs larger models
-- **High Throughput** - Supports 30-50 concurrent users on commodity hardware (Nvidia T4)
-- **Accurate Retrieval** - 70%+ retrieval precision with semantic search
-- **Production Ready** - Comprehensive monitoring, health checks, and error handling
+---
 
 ## Architecture
 
-The system follows a microservices architecture with horizontal scalability:
-
 ```
-┌──────────────┐          ┌──────────────┐          ┌─────────────┐
-│    Moodle    │   REST   │   FastAPI    │   HTTP   │    vLLM     │
-│  Frontend    │◄────────►│   Backend    │◄────────►│  Inference  │
-│              │   API    │ Orchestrator │   API    │   Server    │
-└──────────────┘          └───────┬──────┘          └─────────────┘
-                                  │
-                    ┌─────────────┼─────────────┐
-                    │             │             │
-             ┌──────▼──────┐ ┌───▼────┐ ┌──────▼───────┐
-             │   Qdrant    │ │ Redis  │ │  Embedding   │
-             │Vector Search│ │ Cache  │ │   Service    │
-             │   (HNSW)    │ │(30%HR) │ │(e5-large-ml) │
-             └─────────────┘ └────────┘ └──────────────┘
+Browser / Moodle student
+        │  HTTPS (Tailscale Funnel)
+        ▼
+  ┌─────────────────┐
+  │  nginx :8090    │  path routing
+  │  /   → Moodle   │
+  │  /api/ → API    │
+  └────────┬────────┘
+           │
+  ┌────────▼────────┐       ┌──────────────────┐
+  │  Moodle :80     │       │  FastAPI :8010   │
+  │  block_aichatbot│──────►│  RAG pipeline    │
+  │  proxy.php      │       │  API key auth    │
+  └─────────────────┘       └───────┬──────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              │                     │                     │
+     ┌────────▼──────┐    ┌─────────▼──────┐    ┌────────▼────────┐
+     │  Qdrant :6334 │    │  vLLM  :8011   │    │  Redis  :6379   │
+     │  hybrid search│    │  Qwen2.5-14B   │    │  response cache │
+     │  13,305 chunks│    │  AWQ, L4 GPU   │    │  TTL 7 days     │
+     └───────────────┘    └────────────────┘    └─────────────────┘
 ```
 
-### Component Responsibilities
+### RAG Pipeline
 
-- **FastAPI Backend**: Request orchestration, RAG pipeline coordination, authentication, rate limiting
-- **vLLM Server**: High-performance text generation with PagedAttention and continuous batching
-- **Qdrant**: Vector database with HNSW indexing for sub-100ms similarity search
-- **Redis**: Query/response caching achieving 30%+ hit rate during peak hours
-- **Embedding Service**: Multilingual semantic encoding using intfloat/multilingual-e5-large
+1. **Multi-query expansion** — LLM generates 3 phrasings of the question
+2. **Hybrid retrieval** — dense (multilingual-e5-large, 1024d) + sparse (BM25), top-25 candidates
+3. **RRF fusion** — Reciprocal Rank Fusion merges multi-query results
+4. **Cross-encoder rerank** — BGE-reranker-v2-m3 narrows to top-7 chunks
+5. **Generation** — Qwen2.5-14B-Instruct-AWQ with numbered source context
+6. **Source citations** — response includes `[1]`, `[2]` references rendered as UI pills
 
-## Hardware Requirements
+---
 
-### Minimum (Development)
+## Stack
 
-- **GPU**: Nvidia T4 (16GB VRAM)
-- **CPU**: 8 cores (3.0 GHz+)
-- **RAM**: 32GB DDR4
-- **Storage**: 256GB NVMe SSD
-- **Network**: 1 Gbps
+| Component | Image / Model | Port |
+|---|---|---|
+| Moodle 3.9.24 | custom bitnami base | 80 |
+| FastAPI backend | Python 3.10, uvicorn | 8010 |
+| vLLM inference | vllm/vllm-openai:v0.6.3 | 8011 (host) |
+| Qdrant | qdrant/qdrant:latest | 6334 (host) |
+| Redis | redis:7-alpine | 6379 |
+| MariaDB | mariadb:10.5 | internal |
+| nginx | host | 8090 |
 
-### Recommended (Production)
+**Embedding model:** `intfloat/multilingual-e5-large` (1024d, GPU)  
+**LLM:** `Qwen/Qwen2.5-14B-Instruct-AWQ` (quantized, 24GB L4 GPU)  
+**Reranker:** `BAAI/bge-reranker-v2-m3` (CPU)
 
-- **GPU**: Nvidia T4 (16GB VRAM) or L4 (24GB VRAM)
-- **CPU**: 16 cores (3.5 GHz+)
-- **RAM**: 64GB DDR4
-- **Storage**: 500GB NVMe SSD (RAID 1 recommended)
-- **Network**: 10 Gbps with redundancy
+---
 
 ## Quick Start
 
 ### Prerequisites
 
-- **Operating System**: Ubuntu 22.04 LTS or later
-- **CUDA**: Version 12.1 or later
-- **Docker**: Version 24.0 or later
-- **Docker Compose**: Version 2.20 or later
-- **Git**: Version 2.34 or later
+- Ubuntu 22.04+, Docker + Docker Compose v2
+- NVIDIA GPU with 16GB+ VRAM, CUDA 12.1+
+- Tailscale installed (for public HTTPS access)
 
-### Installation
-
-1. **Clone Repository**
+### 1. Clone and configure
 
 ```bash
-git clone https://github.com/fcim-utm/ai-chatbot.git
-cd ai-chatbot
+git clone https://github.com/nicolaedrabcinski/moodle-rag-chatbot.git
+cd moodle-rag-chatbot
+cp .env.example .env        # edit API keys, model paths
 ```
 
-2. **Configure Environment**
+### 2. Download models
 
 ```bash
-# Copy environment template
-cp .env.example .env
+# LLM (~28GB AWQ)
+huggingface-cli download Qwen/Qwen2.5-14B-Instruct-AWQ \
+  --local-dir models/Qwen--Qwen2.5-14B-Instruct-AWQ
 
-# Edit configuration (see Configuration section)
-nano .env
+# Embedding and reranker models download automatically on first run
 ```
 
-3. **Download Language Model**
+### 3. Start services
 
 ```bash
-# Create models directory
-mkdir -p models
+# Moodle + DB
+docker compose -f docker-compose.moodle.yml up -d
 
-# Download Qwen2.5-3B-Instruct (requires ~6GB)
-huggingface-cli download Qwen/Qwen2.5-3B-Instruct \
-  --local-dir models/Qwen--Qwen2.5-3B-Instruct \
-  --local-dir-use-symlinks False
+# Chatbot backend + vLLM (takes ~2 min for GPU warmup)
+docker compose -f docker-compose.chatbot.yml up -d
+
+# Check health
+curl http://localhost:8010/health
 ```
 
-4. **Launch Services**
+### 4. Install Moodle plugin
 
 ```bash
-# Start all services in detached mode
-docker-compose up -d
-
-# Monitor logs
-docker-compose logs -f backend
+# Plugin is bind-mounted automatically via docker-compose.moodle.yml
+# Or zip and install via Moodle admin UI:
+cd moodle_plugin && zip -r block_aichatbot.zip block_aichatbot/
+# Upload at: Site administration → Plugins → Install plugins
 ```
 
-5. **Verify Deployment**
+### 5. Ingest course materials
 
 ```bash
-# Check service health
-curl http://localhost:8000/health
+# Place PDFs/DOCX/TXT in data/raw/<COURSE-ID>/
+mkdir -p data/raw/ASD-2026
+cp /path/to/lectures/*.pdf data/raw/ASD-2026/
 
-# Expected response: {"status":"healthy","timestamp":"2026-01-09T..."}
+# Ingest (hybrid dense+sparse, ~15 min for 500 pages)
+source .venv/bin/activate
+python scripts/ingestion/ingest_courses.py \
+  --course-dir data/raw/ASD-2026 \
+  --hybrid
+
+# Or use the all-in-one script (creates Moodle course too):
+python scripts/ingestion/add_course.py --course-id ASD-2026
 ```
 
-### First Document Ingestion
+### 6. Public HTTPS via Tailscale Funnel
 
 ```bash
-# Place course materials in data/raw/
-cp /path/to/lecture.pdf data/raw/ASD-2024/
+# Start nginx routing
+sudo systemctl start nginx
 
-# Run ingestion pipeline
-python scripts/ingestion/ingest_documents.py \
-  --course-id ASD-2024 \
-  --input-dir data/raw/ASD-2024 \
-  --chunk-size 512 \
-  --chunk-overlap 50
+# Start Tailscale Funnel (systemd unit included)
+sudo systemctl start tailscale-funnel
+
+# Accessible at: https://<node>.tail<id>.ts.net
 ```
-
-## Configuration
-
-### Core Settings (.env)
-
-```bash
-# Language Model Configuration
-LLM_MODEL=Qwen/Qwen2.5-3B-Instruct
-LLM_BASE_URL=http://vllm:8001/v1
-LLM_MAX_TOKENS=50                    # Concise answers
-LLM_TEMPERATURE=0.3                  # Deterministic responses
-LLM_MAX_MODEL_LEN=4096               # Context window
-LLM_GPU_MEMORY_UTILIZATION=0.80      # GPU allocation
-LLM_DTYPE=auto                       # Mixed precision (FP16/FP32)
-
-# Embedding Configuration
-EMBEDDING_MODEL=intfloat/multilingual-e5-large
-EMBEDDING_DIMENSION=1024
-EMBEDDING_BATCH_SIZE=32
-
-# Vector Database
-QDRANT_HOST=qdrant
-QDRANT_PORT=6333
-QDRANT_COLLECTION=course_materials
-
-# Cache Configuration
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_CACHE_TTL=604800               # 7 days in seconds
-REDIS_MAX_MEMORY=2gb
-
-# API Configuration
-API_PORT=8000
-API_WORKERS=4
-API_RATE_LIMIT=100                   # requests per minute
-API_TIMEOUT=30                       # seconds
-
-# RAG Pipeline
-RAG_TOP_K=5                          # Retrieved documents
-RAG_SIMILARITY_THRESHOLD=0.7         # Minimum relevance score
-RAG_ENABLE_CACHE=true
-```
-
-### Performance Tuning
-
-**For Higher Throughput (more users):**
-```bash
-LLM_GPU_MEMORY_UTILIZATION=0.85      # Increase GPU usage
-API_WORKERS=8                         # More worker processes
-REDIS_MAX_MEMORY=4gb                 # Larger cache
-```
-
-**For Lower Latency (faster responses):**
-```bash
-RAG_TOP_K=3                          # Fewer retrieved docs
-LLM_MAX_TOKENS=30                    # Shorter answers
-REDIS_CACHE_TTL=86400                # More aggressive caching (1 day)
-```
-
-## Usage
-
-### API Endpoints
-
-#### Chat Completion (Synchronous)
-
-```bash
-curl -X POST http://localhost:8000/api/v1/chat \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{
-    "question": "What is the time complexity of quicksort?",
-    "course_id": "ASD-2024",
-    "language": "en"
-  }'
-```
-
-**Response:**
-```json
-{
-  "answer": "O(n²) worst case",
-  "sources": [
-    {
-      "document": "Lecture_02_Sorting.pdf",
-      "page": 15,
-      "relevance": 0.89
-    }
-  ],
-  "cache_hit": false,
-  "latency_ms": 287
-}
-```
-
-#### Stream Completion (Server-Sent Events)
-
-```bash
-curl -X POST http://localhost:8000/api/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{
-    "question": "Explain binary search algorithm",
-    "course_id": "ASD-2024"
-  }'
-```
-
-#### Health Check
-
-```bash
-# Simple health status
-curl http://localhost:8000/health
-
-# Detailed component status
-curl http://localhost:8000/health/detailed
-```
-
-### Python SDK Example
-
-```python
-from fcim_chatbot import ChatbotClient
-
-# Initialize client
-client = ChatbotClient(
-    base_url="http://localhost:8000",
-    api_key="YOUR_API_KEY"
-)
-
-# Ask question
-response = client.ask(
-    question="What is Big O notation?",
-    course_id="ASD-2024",
-    language="en"
-)
-
-print(f"Answer: {response.answer}")
-print(f"Sources: {response.sources}")
-print(f"Latency: {response.latency_ms}ms")
-```
-
-## Monitoring & Observability
-
-### Prometheus Metrics
-
-Access metrics at `http://localhost:9090`
-
-**Key Metrics:**
-- `chatbot_requests_total` - Total requests by endpoint
-- `chatbot_request_duration_seconds` - Response latency histogram
-- `chatbot_cache_hits_total` - Cache hit rate
-- `chatbot_rag_retrieval_precision` - Retrieval quality
-- `vllm_gpu_utilization` - GPU usage percentage
-- `qdrant_search_latency_seconds` - Vector search performance
-
-### Grafana Dashboards
-
-Access dashboards at `http://localhost:3000` (default credentials: `admin/admin`)
-
-**Pre-configured Dashboards:**
-1. **System Overview** - Request volume, latency p50/p95/p99, error rates
-2. **GPU Metrics** - Utilization, memory, temperature, throttling events
-3. **Cache Performance** - Hit rates, memory usage, eviction rates
-4. **User Activity** - Queries per hour, popular courses, response satisfaction
-
-### Log Aggregation
-
-View service logs:
-```bash
-# All services
-docker-compose logs -f
-
-# Specific service
-docker-compose logs -f backend
-
-# With timestamps and tail
-docker-compose logs -f --tail=100 --timestamps backend
-```
-
-## Development
-
-### Project Structure
-
-```
-├── src/
-│   ├── api/                  # FastAPI routes and middleware
-│   ├── core/
-│   │   ├── rag/             # RAG pipeline implementation
-│   │   ├── llm/             # vLLM client wrapper
-│   │   ├── embeddings/      # Embedding generation
-│   │   └── retrieval/       # Qdrant integration
-│   ├── services/
-│   │   ├── cache.py         # Redis caching layer
-│   │   ├── auth.py          # Authentication & authorization
-│   │   └── rate_limit.py    # Rate limiting middleware
-│   └── monitoring/
-│       ├── metrics.py       # Prometheus metrics
-│       └── health.py        # Health check handlers
-├── scripts/
-│   ├── ingestion/           # Document processing scripts
-│   ├── evaluation/          # Quality assessment tools
-│   └── deployment/          # Deployment automation
-├── tests/
-│   ├── unit/               # Unit tests
-│   ├── integration/        # Integration tests
-│   └── performance/        # Load testing
-├── docs/
-│   └── architecture.pdf    # Detailed technical documentation
-├── docker-compose.yml      # Service orchestration
-└── .env.example           # Configuration template
-```
-
-### Running Tests
-
-```bash
-# Install development dependencies
-pip install -r requirements-dev.txt
-
-# Run unit tests
-pytest tests/unit -v
-
-# Run integration tests (requires running services)
-docker-compose up -d
-pytest tests/integration -v
-
-# Run with coverage
-pytest --cov=src --cov-report=html
-
-# Performance testing
-locust -f tests/performance/load_test.py --headless -u 50 -r 10
-```
-
-### Code Quality
-
-```bash
-# Format code
-black src/ tests/
-isort src/ tests/
-
-# Lint
-flake8 src/ tests/
-mypy src/
-
-# Security scan
-bandit -r src/
-```
-
-## Performance Benchmarks
-
-### Latency Distribution (100,000 requests)
-
-| Percentile | Latency | Notes |
-|------------|---------|-------|
-| p50 | 250ms | Median response time |
-| p95 | 890ms | 95th percentile |
-| p99 | 1.2s | 99th percentile |
-| p99.9 | 2.1s | Cold start + queue |
-
-### Throughput Capacity
-
-- **Concurrent Users**: 30-50 (sustained)
-- **Requests/Second**: 25-40 (peak)
-- **Cache Hit Rate**: 32% (typical workload)
-- **GPU Utilization**: 75-85% (peak hours)
-
-### Quality Metrics (Evaluation Dataset: SQuAD v2.0 + HotpotQA)
-
-- **Retrieval Precision**: 72%
-- **Answer Relevance**: 68% (semantic similarity)
-- **Faithfulness**: 83% (grounded in context)
-- **NOT_ANSWERABLE Detection**: 89% accuracy
-
-## Troubleshooting
-
-### Common Issues
-
-**1. GPU Out of Memory**
-```bash
-# Reduce GPU memory allocation
-LLM_GPU_MEMORY_UTILIZATION=0.70
-
-# Decrease batch size
-EMBEDDING_BATCH_SIZE=16
-
-# Restart services
-docker-compose restart vllm
-```
-
-**2. Slow Response Times**
-```bash
-# Check cache hit rate
-curl http://localhost:8000/metrics | grep cache_hits
-
-# Increase cache TTL
-REDIS_CACHE_TTL=1209600  # 14 days
-
-# Optimize retrieval
-RAG_TOP_K=3
-```
-
-**3. Service Won't Start**
-```bash
-# Check logs
-docker-compose logs vllm
-
-# Verify GPU availability
-nvidia-smi
-
-# Reset volumes
-docker-compose down -v
-docker-compose up -d
-```
-
-**4. Poor Answer Quality**
-```bash
-# Adjust retrieval threshold
-RAG_SIMILARITY_THRESHOLD=0.65
-
-# Increase retrieved documents
-RAG_TOP_K=7
-
-# Re-embed documents with higher quality model
-python scripts/ingestion/re_embed.py --model multilingual-e5-large-instruct
-```
-
-## Contributing
-
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md).
-
-### Development Workflow
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes with tests
-4. Run quality checks (`black`, `flake8`, `mypy`, `pytest`)
-5. Commit with conventional commits (`feat:`, `fix:`, `docs:`)
-6. Push to your fork
-7. Open a Pull Request
-
-## Documentation
-
-- **Architecture Overview**: [docs/architecture.pdf](docs/architecture.pdf)
-- **API Reference**: [docs/api.md](docs/api.md)
-- **Deployment Guide**: [docs/deployment.md](docs/deployment.md)
-- **Model Selection**: [docs/model_selection.md](docs/model_selection.md)
-
-## License
-
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details.
-
-## Citation
-
-If you use this work in your research, please cite:
-
-```bibtex
-@techreport{drabcinski2026fcim,
-  title={Development and Evaluation of a Multilingual RAG-based Educational Chatbot},
-  author={Drabcinski, Nicolae},
-  institution={Technical University of Moldova, FCIM},
-  year={2026},
-  type={Technical Report}
-}
-```
-
-## Acknowledgments
-
-- **Qwen Team** for the excellent Qwen2.5 model series
-- **vLLM Team** for high-performance inference infrastructure
-- **Qdrant** for the powerful vector search engine
-- **FCIM ELSE Platform Team** for integration support and testing
-- **Students** who provided valuable feedback during pilot deployment
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/fcim-utm/ai-chatbot/issues)
-- **Email**: nicolae.drabcinski@fcim.utm.md
-- **Documentation**: [Wiki](https://github.com/fcim-utm/ai-chatbot/wiki)
 
 ---
 
-**Status**: Production-ready | **Version**: 1.0.0 | **Last Updated**: January 2026
+## Moodle Plugin
+
+The plugin lives at `moodle_plugin/block_aichatbot/`. Key files:
+
+| File | Purpose |
+|---|---|
+| `block_aichatbot.php` | Block class, UI HTML/CSS |
+| `proxy.php` | Server-side SSE proxy (Moodle → API, adds auth header) |
+| `settings.php` | Admin settings: API URL, API key |
+| `amd/src/chatbot.js` | Frontend: streaming, source citation pills |
+
+**Authentication:** API key is set in Moodle admin settings and injected server-side by `proxy.php`. The browser never sees the key.
+
+### Plugin settings (Moodle admin)
+
+| Setting | Value |
+|---|---|
+| API URL | `http://localhost:8010` |
+| API Key | (from `docker-compose.chatbot.yml` → `API_KEY`) |
+
+---
+
+## API
+
+All endpoints require `Authorization: Bearer <API_KEY>` except `/health`.
+
+```
+POST /api/chat         → non-streaming JSON response
+POST /api/chat/stream  → SSE stream (token-by-token)
+GET  /health           → {"status": "healthy"}
+GET  /docs             → Swagger UI
+```
+
+### Streaming response format
+
+```
+data: {"type": "meta", "sources": [{"index": 1, "document": "ECD 2026", "topic": "14_gdpr", ...}]}
+data: {"type": "token", "text": "GDPR "}
+data: {"type": "token", "text": "reglementează "}
+...
+data: [DONE]
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:8010/api/chat/stream \
+  -H "Authorization: Bearer <API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Ce este GDPR?", "language": "ro"}'
+```
+
+---
+
+## Adding New Courses
+
+```bash
+# 1. List configured courses and their ingest status
+python scripts/ingestion/add_course.py --list
+
+# 2. Add a course (copies files, ingests, creates Moodle course, clears cache)
+python scripts/ingestion/add_course.py \
+  --course-id BD-2026 \
+  --materials-dir /path/to/bd/pdfs
+
+# 3. Or place files manually and re-ingest all courses with BM25 re-fit
+python scripts/ingestion/ingest_courses.py --all --hybrid
+```
+
+Course metadata (names, descriptions) is in `data/courses_config.json`.
+
+---
+
+## Evaluation
+
+LLM-as-judge evaluation using Qwen2.5-14B itself as judge. 844 questions across ECD-2026 and FILOS-2026.
+
+```bash
+python scripts/evaluation/evaluate.py \
+  --dataset data/eval/dataset_v2.jsonl \
+  --api-url http://localhost:8010 \
+  --api-key <API_KEY> \
+  --results-jsonl data/eval/results_v8.jsonl \
+  --llm-url http://localhost:8011/v1 \
+  --model "Qwen/Qwen2.5-14B-Instruct" \
+  --concurrency 3
+```
+
+### Results (v8, current)
+
+| Metric | Value |
+|---|---|
+| Mean score (1–5) | **3.65** |
+| Retrieval hit rate | 93.9% |
+| No-info rate | 3.1% |
+| p50 latency | 28s |
+| Questions evaluated | 844 |
+
+| Course | n | Score | Hit rate |
+|---|---|---|---|
+| ECD-2026 | 424 | 3.62 | 398/424 (93.9%) |
+| FILOS-2026 | 416 | 3.68 | 391/416 (94.0%) |
+
+---
+
+## Project Structure
+
+```
+.
+├── src/
+│   ├── api/
+│   │   ├── main.py              # FastAPI app, auth middleware
+│   │   └── routes/
+│   │       ├── chat.py          # /chat and /chat/stream endpoints
+│   │       └── health.py
+│   └── core/
+│       ├── config/
+│       │   ├── settings.py      # env-based config
+│       │   └── prompts.py       # system prompts (ro/ru/en)
+│       ├── embeddings/service.py
+│       ├── llm/client.py
+│       └── rag/
+│           ├── pipeline.py      # multi-query, RRF, rerank, generate
+│           ├── bm25_encoder.py  # sparse BM25 vectors
+│           └── models.py        # Pydantic request/response models
+├── moodle_plugin/
+│   └── block_aichatbot/
+│       ├── block_aichatbot.php  # Moodle block, UI
+│       ├── proxy.php            # Server-side SSE proxy
+│       ├── settings.php
+│       └── amd/src/chatbot.js   # Frontend streaming + source pills
+├── scripts/
+│   ├── ingestion/
+│   │   ├── ingest_courses.py    # batch ingest
+│   │   └── add_course.py        # add single course + Moodle course
+│   └── evaluation/
+│       └── evaluate.py          # LLM-as-judge eval
+├── data/
+│   ├── courses_config.json      # course id → name/description
+│   ├── raw/                     # source PDFs and TXT per course
+│   ├── bm25_vocab.json          # fitted BM25 vocabulary
+│   └── eval/                    # eval datasets and results
+├── docker-compose.chatbot.yml   # backend + vLLM
+├── docker-compose.moodle.yml    # Moodle + MariaDB
+└── docker/
+    ├── chatbot/Dockerfile
+    └── moodle/
+```
+
+---
+
+## Server
+
+Production environment:
+
+- **OS:** Ubuntu 24.04
+- **CPU:** 64 cores
+- **RAM:** 125 GB
+- **GPU:** NVIDIA L4 (24 GB VRAM)
+- **LAN IP:** 10.202.40.130
+- **Public URL:** `https://biovm00006.tail46c0ff.ts.net` (Tailscale Funnel)
+
+---
+
+## License
+
+MIT
